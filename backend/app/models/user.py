@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import relationship
 
 from app.db.database import Base
 
@@ -34,4 +35,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow
+    )
+
+    profile = relationship(
+    "Profile",
+    back_populates="user",
+    uselist=False
     )
