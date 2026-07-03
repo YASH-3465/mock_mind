@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Integer, String, DateTime
+from sqlalchemy import ForeignKey, Integer, String, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 
@@ -27,6 +27,11 @@ class Resume(Base):
     file_path: Mapped[str] = mapped_column(
         String(500),
         nullable=False
+    )
+
+    resume_text: Mapped[str | None] = mapped_column(
+    Text,
+    nullable=True
     )
 
     uploaded_at: Mapped[datetime] = mapped_column(

@@ -10,6 +10,7 @@ from app.db.database import get_db
 from app.models.user import User
 from app.schemas.resume import ResumeResponse
 from app.services.resume_service import save_resume
+from app.services.resume_service import get_resume_text
 
 router = APIRouter(prefix="/resume", tags=["Resume"])
 
@@ -47,3 +48,32 @@ def upload_resume(
         file.filename,
         file_path,
     )
+
+@router.get("/text/{resume_id}")
+def read_resume_text(
+    resume_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    email = verify_token(credentials.credentials)
+
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    resume = (
+        db.query(Resume)
+        .filter(
+            Resume.id == resume_id,
+            Resume.user_id == user.id,
+        )
+        .first()
+    )
+
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    return {
+    "text": resume.resume_text
+    }
