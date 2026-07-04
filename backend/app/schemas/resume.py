@@ -7,6 +7,7 @@ class ResumeResponse(BaseModel):
     user_id: int
     file_name: str
     file_path: str
+    resume_text: str | None
     uploaded_at: datetime
 
     class Config:
