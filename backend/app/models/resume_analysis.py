@@ -71,3 +71,9 @@ class ResumeAnalysis(Base):
         "Resume",
         back_populates="analysis"
     )
+
+
+    sessions = relationship(
+    "InterviewSession",
+    back_populates="analysis"
+    )

@@ -47,3 +47,8 @@ class User(Base):
     "Resume",
     back_populates="user"
     )
+
+    sessions = relationship(
+    "InterviewSession",
+    back_populates="user"
+    )
