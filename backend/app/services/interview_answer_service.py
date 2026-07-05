@@ -23,6 +23,23 @@ def submit_answer(
     if not question:
         return None
 
+    existing_answer = (
+        db.query(InterviewAnswer)
+        .filter(
+            InterviewAnswer.interview_question_id == question.id
+        )
+        .first()
+    )
+
+    if existing_answer:
+        existing_answer.answer_text = answer_text
+        existing_answer.answer_duration = answer_duration
+
+        db.commit()
+        db.refresh(existing_answer)
+
+        return existing_answer
+
     answer = InterviewAnswer(
         interview_question_id=question.id,
         answer_text=answer_text,

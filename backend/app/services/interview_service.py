@@ -7,6 +7,33 @@ from app.models.resume_analysis import ResumeAnalysis
 from app.models.interview_question import InterviewQuestion
 from app.prompts.interview_prompt import INTERVIEW_QUESTION_PROMPT
 from app.models.interview_session import InterviewSession
+from datetime import datetime
+
+
+
+
+def complete_interview(
+    db: Session,
+    session_id: int,
+):
+    session = (
+        db.query(InterviewSession)
+        .filter(
+            InterviewSession.id == session_id
+        )
+        .first()
+    )
+
+    if not session:
+        return None
+
+    session.status = "COMPLETED"
+    session.completed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(session)
+
+    return session
 
 
 def generate_interview_questions(
