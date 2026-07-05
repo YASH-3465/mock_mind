@@ -7,3 +7,4 @@ from app.models.resume import Resume
 from app.models.resume_analysis import ResumeAnalysis
 from app.models.interview_question import InterviewQuestion
 from app.models.interview_session import InterviewSession
+from app.models.interview_answer import InterviewAnswer

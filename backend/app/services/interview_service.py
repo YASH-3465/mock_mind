@@ -76,10 +76,11 @@ Weaknesses:
 
     saved_questions = []
 
-    for q in questions:
+    for index, q in enumerate(questions, start=1):
 
         question = InterviewQuestion(
             interview_session_id=session.id,
+            question_number=index,
             question=q["question"],
             ideal_answer=q["ideal_answer"],
             category=q["category"],

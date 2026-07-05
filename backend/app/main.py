@@ -4,6 +4,7 @@ from app.api.profile import router as profile_router
 from app.api.resume import router as resume_router
 from app.api.analysis import router as analysis_router
 from app.api.interview import router as interview_router
+from app.db import base
 
 app = FastAPI(
     title="Mock Mind API",

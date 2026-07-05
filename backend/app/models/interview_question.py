@@ -20,6 +20,11 @@ class InterviewQuestion(Base):
     nullable=False
     )
 
+    question_number: Mapped[int] = mapped_column(
+    Integer,
+    nullable=False
+    )
+
     question: Mapped[str] = mapped_column(
         Text,
         nullable=False
@@ -53,4 +58,10 @@ class InterviewQuestion(Base):
     session = relationship(
     "InterviewSession",
     back_populates="questions"
+    )
+
+    answer = relationship(
+    "InterviewAnswer",
+    back_populates="question",
+    uselist=False
     )
