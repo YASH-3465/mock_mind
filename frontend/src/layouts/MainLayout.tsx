@@ -1,16 +1,12 @@
 import { Outlet } from "react-router-dom";
 
+import Navbar from "../components/common/Navbar";
+import Footer from "../components/common/Footer";
+
 const MainLayout = () => {
   return (
     <>
-      <header
-        style={{
-          padding: "16px",
-          borderBottom: "1px solid #333",
-        }}
-      >
-        <h2>Mock Mind</h2>
-      </header>
+      <Navbar />
 
       <main
         style={{
@@ -21,15 +17,7 @@ const MainLayout = () => {
         <Outlet />
       </main>
 
-      <footer
-        style={{
-          padding: "16px",
-          borderTop: "1px solid #333",
-          textAlign: "center",
-        }}
-      >
-        © Mock Mind
-      </footer>
+      <Footer />
     </>
   );
 };
