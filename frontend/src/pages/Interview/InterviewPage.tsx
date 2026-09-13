@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { completeInterview, evaluateAnswer, generateInterview, saveAnswer } from "../../lib/api";
 import type { InterviewData, Question } from "../../lib/types";
 
-type SpeechRecognitionCtor = new () => SpeechRecognition;
+type SpeechRecognitionCtor = new () => any;
 declare global { interface Window { SpeechRecognition?: SpeechRecognitionCtor; webkitSpeechRecognition?: SpeechRecognitionCtor; } }
 
 export default function InterviewPage(){
