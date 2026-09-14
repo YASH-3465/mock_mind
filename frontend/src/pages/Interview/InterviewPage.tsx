@@ -133,31 +133,41 @@ export default function InterviewPage() {
   // --------------------------------------------------
   // CAMERA
   // --------------------------------------------------
+async function prepareCamera() {
+  try {
+    setCameraError("");
 
-  async function prepareCamera() {
-    try {
-      setCameraError("");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+    streamRef.current = stream;
 
-      streamRef.current = stream;
+    setCameraOn(true);
+  } catch (error) {
+    console.error("Camera permission error:", error);
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-
-      setCameraOn(true);
-    } catch (error) {
-      console.error("Camera permission error:", error);
-
-      setCameraError(
-        "Camera permission was not granted. You can still continue with voice/text."
-      );
-    }
+    setCameraError(
+      "Camera permission was not granted. You can still continue with voice/text."
+    );
   }
+}
+
+useEffect(() => {
+  if (!cameraOn) return;
+
+  const video = videoRef.current;
+  const stream = streamRef.current;
+
+  if (!video || !stream) return;
+
+  video.srcObject = stream;
+
+  video.play().catch((error) => {
+    console.error("Could not start camera preview:", error);
+  });
+}, [cameraOn]);
 
   // --------------------------------------------------
   // TEXT TO SPEECH

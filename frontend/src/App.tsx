@@ -3,7 +3,7 @@ import LandingPage from "./pages/Landing/LandingPage";
 import LoginPage from "./pages/Auth/LoginPage";
 import SignupPage from "./pages/Auth/SignupPage";
 import DashboardPage from "./pages/Dashboard/DashboardPage";
-import ResumePage from "./pages/Resume/ResumePage";
+import ResumePage from "./pages/ResumePage";
 import InterviewPage from "./pages/Interview/InterviewPage";
 import ResultsPage from "./pages/ResultsPage";
 

@@ -17,7 +17,7 @@ export type InterviewData = {
 export type InterviewResult = {
   session_id: number;
   status: string;
-  completed_at: string;
+  completed_at: string | null;
   total_questions: number;
   answered_questions: number;
   evaluated_answers: number;
@@ -25,4 +25,39 @@ export type InterviewResult = {
   communication_score: number;
   confidence_score: number;
   overall_score: number;
+};
+
+export type InterviewHistoryItem = {
+  session_id: number;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  total_questions: number;
+  answered_questions: number;
+  technical_score: number;
+  communication_score: number;
+  confidence_score: number;
+  overall_score: number;
+};
+
+export type ResumeAnalysis = {
+  id: number;
+  resume_id: number;
+  summary: string | null;
+  skills: string | null;
+  projects: string | null;
+  experience: string | null;
+  education: string | null;
+  certifications: string | null;
+  strengths: string | null;
+  weaknesses: string | null;
+  created_at: string;
+};
+
+
+export type Resume = {
+  id: number;
+  file_name: string;
+  uploaded_at: string;
+  has_analysis: boolean;
 };

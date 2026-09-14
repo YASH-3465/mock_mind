@@ -274,6 +274,88 @@ def get_interview_progress(
         "questions": question_status,
     }
 
+def get_interview_history(
+    db: Session,
+    user_id: int,
+):
+    sessions = (
+        db.query(InterviewSession)
+        .filter(
+            InterviewSession.user_id == user_id,
+            InterviewSession.status == "COMPLETED",
+        )
+        .order_by(
+            InterviewSession.completed_at.desc()
+        )
+        .all()
+    )
+
+    history = []
+
+    for session in sessions:
+
+        questions = (
+            db.query(InterviewQuestion)
+            .filter(
+                InterviewQuestion.interview_session_id == session.id
+            )
+            .order_by(
+                InterviewQuestion.question_number
+            )
+            .all()
+        )
+
+        answers = (
+            db.query(InterviewAnswer)
+            .join(InterviewQuestion)
+            .filter(
+                InterviewQuestion.interview_session_id == session.id
+            )
+            .all()
+        )
+
+        technical_scores = [
+            answer.technical_score
+            for answer in answers
+            if answer.technical_score is not None
+        ]
+
+        communication_scores = [
+            answer.communication_score
+            for answer in answers
+            if answer.communication_score is not None
+        ]
+
+        confidence_scores = [
+            answer.confidence_score
+            for answer in answers
+            if answer.confidence_score is not None
+        ]
+
+        history.append({
+            "session_id": session.id,
+            "status": session.status,
+            "started_at": session.started_at,
+            "completed_at": session.completed_at,
+            "total_questions": len(questions),
+            "answered_questions": len(answers),
+            "technical_score": round(
+                sum(technical_scores) / len(technical_scores),
+                2
+            ) if technical_scores else 0,
+            "communication_score": round(
+                sum(communication_scores) / len(communication_scores),
+                2
+            ) if communication_scores else 0,
+            "confidence_score": round(
+                sum(confidence_scores) / len(confidence_scores),
+                2
+            ) if confidence_scores else 0,
+            "overall_score": session.overall_score or 0,
+        })
+
+    return history
+
 
 def generate_interview_questions(
     db: Session,
@@ -375,4 +457,81 @@ Weaknesses:
     return {
         "session_id": session.id,
         "questions": saved_questions
+    }
+
+def get_interview_result(
+    db: Session,
+    session_id: int,
+    user_id: int,
+):
+    session = (
+        db.query(InterviewSession)
+        .filter(
+            InterviewSession.id == session_id,
+            InterviewSession.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not session:
+        return None
+
+    questions = (
+        db.query(InterviewQuestion)
+        .filter(
+            InterviewQuestion.interview_session_id == session.id
+        )
+        .all()
+    )
+
+    answers = (
+        db.query(InterviewAnswer)
+        .join(InterviewQuestion)
+        .filter(
+            InterviewQuestion.interview_session_id == session.id
+        )
+        .all()
+    )
+
+    technical_scores = [
+        answer.technical_score
+        for answer in answers
+        if answer.technical_score is not None
+    ]
+
+    communication_scores = [
+        answer.communication_score
+        for answer in answers
+        if answer.communication_score is not None
+    ]
+
+    confidence_scores = [
+        answer.confidence_score
+        for answer in answers
+        if answer.confidence_score is not None
+    ]
+
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "completed_at": session.completed_at,
+        "total_questions": len(questions),
+        "answered_questions": len(answers),
+        "evaluated_answers": len([
+            answer for answer in answers
+            if answer.overall_score is not None
+        ]),
+        "technical_score": round(
+            sum(technical_scores) / len(technical_scores),
+            2
+        ) if technical_scores else 0,
+        "communication_score": round(
+            sum(communication_scores) / len(communication_scores),
+            2
+        ) if communication_scores else 0,
+        "confidence_score": round(
+            sum(confidence_scores) / len(confidence_scores),
+            2
+        ) if confidence_scores else 0,
+        "overall_score": session.overall_score or 0,
     }

@@ -1,3 +1,5 @@
+from app.core.dependencies import get_current_user
+from app.models.user import User
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -6,7 +8,8 @@ from app.db.database import get_db
 from app.services.interview_service import generate_interview_questions
 from app.services.interview_service import complete_interview
 from app.services.interview_service import get_interview_progress
-
+from app.services.interview_service import get_interview_history
+from app.services.interview_service import get_interview_result
 
 router = APIRouter(
     prefix="/interview",
@@ -50,6 +53,42 @@ def finish_interview(
 
     return result
 
+
+
+@router.get("/history")
+def interview_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_interview_history(
+        db=db,
+        user_id=current_user.id,
+    )
+
+
+
+@router.get("/{session_id}/result")
+def interview_result(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = get_interview_result(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview result not found."
+        )
+
+    return result
+
+
+
 @router.get("/{session_id}/progress")
 def interview_progress(
     session_id: int,
@@ -67,4 +106,5 @@ def interview_progress(
         )
 
     return result
+
 
