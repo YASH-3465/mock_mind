@@ -11,3 +11,4 @@ export async function generateInterview(analysisId:number){return(await api.post
 export async function saveAnswer(payload:{session_id:number;question_number:number;answer_text:string;answer_duration:number}){return(await api.post("/answer/",payload)).data}
 export async function evaluateAnswer(answerId:number){return(await api.post(`/answer/${answerId}/evaluate`)).data}
 export async function completeInterview(sessionId:number){return(await api.post(`/interview/${sessionId}/complete`)).data}
+export async function getInterviewHistory(){return(await api.get("/interview-history/")).data}
