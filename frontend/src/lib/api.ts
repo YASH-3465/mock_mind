@@ -7,6 +7,10 @@ export const api = axios.create({
   baseURL: API_BASE,
 });
 
+// --------------------------------------------------
+// AUTH TOKEN INTERCEPTOR
+// --------------------------------------------------
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("mockmind_token");
 
@@ -54,10 +58,41 @@ export async function login(
   return data;
 }
 
-export function logout() {
+// --------------------------------------------------
+// CURRENT USER
+// --------------------------------------------------
+
+export type CurrentUser = {
+  id: number;
+  full_name: string;
+  email: string;
+  created_at: string;
+};
+
+export async function getCurrentUser(): Promise<CurrentUser> {
+  return (
+    await api.get("/auth/me")
+  ).data;
+}
+
+// --------------------------------------------------
+// AUTH STATE HELPERS
+// --------------------------------------------------
+
+export function isLoggedIn(): boolean {
+  return Boolean(
+    localStorage.getItem("mockmind_token")
+  );
+}
+
+export function clearAuth() {
   localStorage.removeItem("mockmind_token");
   localStorage.removeItem("mockmind_session");
   localStorage.removeItem("mockmind_questions");
+}
+
+export function logout() {
+  clearAuth();
 }
 
 // --------------------------------------------------
@@ -75,8 +110,11 @@ export async function uploadResume(file: File) {
 }
 
 export async function getResumeHistory() {
-  return (await api.get("/resume/history")).data;
+  return (
+    await api.get("/resume/history")
+  ).data;
 }
+
 // --------------------------------------------------
 // RESUME ANALYSIS
 // --------------------------------------------------
@@ -96,13 +134,19 @@ export type ResumeAnalysis = {
 };
 
 export async function getMyResumes() {
-  return (await api.get("/resume/")).data;
+  return (
+    await api.get("/resume/")
+  ).data;
 }
 
 export async function analyzeResume(
   resumeId: number
 ): Promise<ResumeAnalysis> {
-  return (await api.post(`/analysis/${resumeId}`)).data;
+  return (
+    await api.post(
+      `/analysis/${resumeId}`
+    )
+  ).data;
 }
 
 // --------------------------------------------------
@@ -113,7 +157,9 @@ export async function generateInterview(
   analysisId: number
 ) {
   return (
-    await api.post(`/interview/${analysisId}`)
+    await api.post(
+      `/interview/${analysisId}`
+    )
   ).data;
 }
 
@@ -133,7 +179,9 @@ export async function completeInterview(
 
 export async function getInterviewHistory() {
   return (
-    await api.get("/interview/history")
+    await api.get(
+      "/interview/history"
+    )
   ).data;
 }
 
@@ -148,7 +196,10 @@ export async function saveAnswer(payload: {
   answer_duration: number;
 }) {
   return (
-    await api.post("/answer/", payload)
+    await api.post(
+      "/answer/",
+      payload
+    )
   ).data;
 }
 
@@ -161,6 +212,3 @@ export async function evaluateAnswer(
     )
   ).data;
 }
-
-
-
