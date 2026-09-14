@@ -35,7 +35,6 @@ app.include_router(interview_router)
 app.include_router(interview_answer_router)
 app.include_router(interview_history_router)
 
-
 @app.get("/")
 def home():
     return {
