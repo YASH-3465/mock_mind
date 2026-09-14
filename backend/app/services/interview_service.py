@@ -535,3 +535,55 @@ def get_interview_result(
         ) if confidence_scores else 0,
         "overall_score": session.overall_score or 0,
     }
+
+
+def cancel_interview(
+    db: Session,
+    session_id: int,
+    user_id: int,
+):
+    session = (
+        db.query(InterviewSession)
+        .filter(
+            InterviewSession.id == session_id,
+            InterviewSession.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not session:
+        return None
+
+    # Delete all answers belonging to this interview
+    questions = (
+        db.query(InterviewQuestion)
+        .filter(
+            InterviewQuestion.interview_session_id == session_id
+        )
+        .all()
+    )
+
+    for question in questions:
+        db.query(InterviewAnswer).filter(
+            InterviewAnswer.interview_question_id == question.id
+        ).delete(
+            synchronize_session=False
+        )
+
+    # Delete all questions
+    db.query(InterviewQuestion).filter(
+        InterviewQuestion.interview_session_id == session_id
+    ).delete(
+        synchronize_session=False
+    )
+
+    # Delete the interview session itself
+    db.delete(session)
+
+    db.commit()
+
+    return {
+        "session_id": session_id,
+        "status": "CANCELLED",
+        "message": "Interview cancelled and partial data deleted."
+    }

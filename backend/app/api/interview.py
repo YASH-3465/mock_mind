@@ -10,6 +10,7 @@ from app.services.interview_service import complete_interview
 from app.services.interview_service import get_interview_progress
 from app.services.interview_service import get_interview_history
 from app.services.interview_service import get_interview_result
+from app.services.interview_service import cancel_interview
 
 router = APIRouter(
     prefix="/interview",
@@ -53,6 +54,27 @@ def finish_interview(
 
     return result
 
+
+
+@router.delete("/{session_id}/cancel")
+def cancel_interview_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = cancel_interview(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Interview session not found."
+        )
+
+    return result
 
 
 @router.get("/history")

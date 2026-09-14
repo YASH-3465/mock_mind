@@ -8,12 +8,22 @@ import {
   MicOff,
   Send,
   Volume2,
+  X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
-import { completeInterview, saveAnswer } from "../../lib/api";
-import type { InterviewData, Question } from "../../lib/types";
+import {
+  completeInterview,
+  saveAnswer,
+  cancelInterview,
+  getCurrentUser,
+} from "../../lib/api";
+
+import type {
+  InterviewData,
+  Question,
+} from "../../lib/types";
 
 type SpeechRecognitionCtor = new () => any;
 
@@ -28,9 +38,17 @@ export default function InterviewPage() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
 
+  // --------------------------------------------------
+  // INTERVIEW DATA
+  // --------------------------------------------------
+
   const [questions, setQuestions] = useState<Question[]>([]);
   const [index, setIndex] = useState(0);
   const [answer, setAnswer] = useState("");
+
+  // --------------------------------------------------
+  // INTERVIEW STATE
+  // --------------------------------------------------
 
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -42,7 +60,25 @@ export default function InterviewPage() {
   const [started, setStarted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
+  const [showEndModal, setShowEndModal] = useState(false);
+const [endingInterview, setEndingInterview] = useState(false);
+
+  // --------------------------------------------------
+  // PERMISSION / INTRO STATE
+  // --------------------------------------------------
+
+  const [candidateName, setCandidateName] = useState("there");
+
+  const [permissionStage, setPermissionStage] = useState<
+    "intro" | "requesting" | "ready" | "error" | "question"
+  >("intro");
+
+  // --------------------------------------------------
+  // REFS
+  // --------------------------------------------------
+
   const videoRef = useRef<HTMLVideoElement>(null);
+
   const streamRef = useRef<MediaStream | null>(null);
 
   const startedAt = useRef(Date.now());
@@ -56,15 +92,68 @@ export default function InterviewPage() {
   const shouldListenRef = useRef(false);
 
   /*
-   * Stores all final speech transcripts.
+   * Keeps the latest interview state available
+   * inside asynchronous callbacks.
    *
-   * This is important because Chrome can automatically
-   * terminate SpeechRecognition even when the candidate
-   * is still speaking.
+   * This avoids stale React state inside
+   * speechSynthesis callbacks.
+   */
+  const startedRef = useRef(false);
+  const savingRef = useRef(false);
+
+  /*
+   * Stores final speech transcripts.
    */
   const finalTranscriptRef = useRef("");
 
+  /*
+   * Prevents welcome sequence from running
+   * more than once.
+   */
+  const introStartedRef = useRef(false);
+
+  /*
+   * Prevents multiple recognition instances
+   * from being created simultaneously.
+   */
+  const recognitionStartingRef = useRef(false);
+
   const question = questions[index];
+
+  // --------------------------------------------------
+  // KEEP LIVE REFS SYNCHRONIZED
+  // --------------------------------------------------
+
+  useEffect(() => {
+    startedRef.current = started;
+  }, [started]);
+
+  useEffect(() => {
+    savingRef.current = saving;
+  }, [saving]);
+
+  // --------------------------------------------------
+  // LOAD CURRENT USER
+  // --------------------------------------------------
+
+  useEffect(() => {
+    async function loadCurrentUser() {
+      try {
+        const user = await getCurrentUser();
+
+        if (user?.full_name) {
+          setCandidateName(user.full_name);
+        }
+      } catch (error) {
+        console.error(
+          "Could not load current user:",
+          error
+        );
+      }
+    }
+
+    loadCurrentUser();
+  }, []);
 
   // --------------------------------------------------
   // LOAD QUESTIONS
@@ -73,18 +162,27 @@ export default function InterviewPage() {
   useEffect(() => {
     if (!sessionId) return;
 
-    const raw = localStorage.getItem("mockmind_questions");
+    const raw = localStorage.getItem(
+      "mockmind_questions"
+    );
 
     if (!raw) return;
 
     try {
-      const data = JSON.parse(raw) as InterviewData;
+      const data =
+        JSON.parse(raw) as InterviewData;
 
-      if (String(data.session_id) === sessionId) {
+      if (
+        String(data.session_id) ===
+        sessionId
+      ) {
         setQuestions(data.questions);
       }
     } catch (error) {
-      console.error("Could not load interview questions:", error);
+      console.error(
+        "Could not load interview questions:",
+        error
+      );
     }
   }, [sessionId]);
 
@@ -95,7 +193,11 @@ export default function InterviewPage() {
   useEffect(() => {
     const id = setInterval(() => {
       setElapsed(
-        Math.floor((Date.now() - startedAt.current) / 1000)
+        Math.floor(
+          (Date.now() -
+            startedAt.current) /
+            1000
+        )
       );
     }, 1000);
 
@@ -110,103 +212,365 @@ export default function InterviewPage() {
     return () => {
       shouldListenRef.current = false;
 
-      streamRef.current?.getTracks().forEach((track) => {
-        track.stop();
-      });
+      streamRef.current
+        ?.getTracks()
+        .forEach((track) => {
+          track.stop();
+        });
 
-      recognitionRef.current?.stop();
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      recognitionRef.current = null;
 
       speechSynthesis.cancel();
     };
   }, []);
 
   // --------------------------------------------------
-  // SPEAK QUESTION BEFORE INTERVIEW START
+  // FIND A NATURAL-SOUNDING VOICE
   // --------------------------------------------------
 
-  useEffect(() => {
-    if (question && !started) {
-      speak(question.question);
+  function getPreferredVoice() {
+    const voices =
+      speechSynthesis.getVoices();
+
+    if (!voices.length) {
+      return null;
     }
-  }, [question, started]);
 
-  // --------------------------------------------------
-  // CAMERA
-  // --------------------------------------------------
-async function prepareCamera() {
-  try {
-    setCameraError("");
+    const preferredNames = [
+      "Google US English",
+      "Google UK English Female",
+      "Microsoft Jenny",
+      "Microsoft Aria",
+      "Microsoft Ava",
+      "Samantha",
+      "Karen",
+      "Daniel",
+    ];
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true,
-    });
+    for (const preferred of preferredNames) {
+      const match = voices.find(
+        (voice) =>
+          voice.name
+            .toLowerCase()
+            .includes(
+              preferred.toLowerCase()
+            )
+      );
 
-    streamRef.current = stream;
+      if (match) {
+        return match;
+      }
+    }
 
-    setCameraOn(true);
-  } catch (error) {
-    console.error("Camera permission error:", error);
-
-    setCameraError(
-      "Camera permission was not granted. You can still continue with voice/text."
+    return (
+      voices.find(
+        (voice) =>
+          voice.lang
+            .toLowerCase()
+            .startsWith("en-us")
+      ) ??
+      voices.find(
+        (voice) =>
+          voice.lang
+            .toLowerCase()
+            .startsWith("en")
+      ) ??
+      voices[0]
     );
   }
-}
-
-useEffect(() => {
-  if (!cameraOn) return;
-
-  const video = videoRef.current;
-  const stream = streamRef.current;
-
-  if (!video || !stream) return;
-
-  video.srcObject = stream;
-
-  video.play().catch((error) => {
-    console.error("Could not start camera preview:", error);
-  });
-}, [cameraOn]);
 
   // --------------------------------------------------
   // TEXT TO SPEECH
   // --------------------------------------------------
 
-  function speak(text: string) {
+  function speak(
+    text: string,
+    onEnd?: () => void,
+    autoListen = false
+  ) {
     setSpeaking(true);
 
     /*
-     * Stop any previous speech.
+     * Stop previous speech.
      */
     speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    /*
+     * AI must not listen to itself.
+     */
+    shouldListenRef.current = false;
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // Ignore recognition stop errors
+      }
+
+      recognitionRef.current = null;
+    }
+
+    setListening(false);
+
+    const utterance =
+      new SpeechSynthesisUtterance(text);
+
+    /*
+     * Use the preferred browser voice when available.
+     */
+    const preferredVoice =
+      getPreferredVoice();
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
 
     utterance.rate = 0.96;
     utterance.pitch = 1;
 
-    utterance.onend = () => {
+    const finishSpeech = () => {
       setSpeaking(false);
 
       /*
-       * Once the AI finishes asking the question,
-       * automatically start listening.
+       * Run the supplied callback first.
        */
-      if (started && !saving) {
-        startListening();
+      if (onEnd) {
+        onEnd();
+      }
+
+      /*
+       * IMPORTANT:
+       *
+       * Use refs instead of React state here.
+       *
+       * React state can be stale inside asynchronous
+       * speech callbacks.
+       */
+      if (
+        autoListen &&
+        startedRef.current &&
+        !savingRef.current
+      ) {
+        setTimeout(() => {
+          if (
+            startedRef.current &&
+            !savingRef.current
+          ) {
+            startListening();
+          }
+        }, 500);
       }
     };
 
+    utterance.onend = finishSpeech;
+
     utterance.onerror = () => {
       setSpeaking(false);
+
+      if (onEnd) {
+        onEnd();
+      }
+
+      /*
+       * Even if TTS fails, continue automatically.
+       */
+      if (
+        autoListen &&
+        startedRef.current &&
+        !savingRef.current
+      ) {
+        setTimeout(() => {
+          if (
+            startedRef.current &&
+            !savingRef.current
+          ) {
+            startListening();
+          }
+        }, 500);
+      }
     };
 
     speechSynthesis.speak(utterance);
   }
 
   // --------------------------------------------------
-  // START SPEECH RECOGNITION
+  // CAMERA + MICROPHONE PERMISSION
+  // --------------------------------------------------
+
+  async function prepareCamera(): Promise<boolean> {
+    try {
+      setCameraError("");
+      setPermissionStage("requesting");
+
+      /*
+       * Request BOTH camera and microphone together.
+       */
+      const stream =
+        await navigator.mediaDevices.getUserMedia(
+          {
+            video: true,
+            audio: true,
+          }
+        );
+
+      /*
+       * Stop any previous stream first.
+       */
+      if (streamRef.current) {
+        streamRef.current
+          .getTracks()
+          .forEach((track) => {
+            track.stop();
+          });
+      }
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject =
+          stream;
+
+        try {
+          await videoRef.current.play();
+        } catch (error) {
+          console.log(
+            "Video playback note:",
+            error
+          );
+        }
+      }
+
+      setCameraOn(true);
+      setPermissionStage("ready");
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Camera/microphone permission error:",
+        error
+      );
+
+      setCameraOn(false);
+      setPermissionStage("error");
+
+      setCameraError(
+        "Camera or microphone permission was not granted. Please allow both permissions and try again."
+      );
+
+      return false;
+    }
+  }
+
+  // --------------------------------------------------
+  // CONNECT CAMERA STREAM TO VIDEO
+  // --------------------------------------------------
+
+  useEffect(() => {
+    if (
+      cameraOn &&
+      videoRef.current &&
+      streamRef.current
+    ) {
+      videoRef.current.srcObject =
+        streamRef.current;
+
+      videoRef.current
+        .play()
+        .catch((error) => {
+          console.log(
+            "Video autoplay error:",
+            error
+          );
+        });
+    }
+  }, [cameraOn]);
+
+  // --------------------------------------------------
+  // BEGIN INTERVIEW
+  // --------------------------------------------------
+
+  function begin() {
+    if (introStartedRef.current) {
+      return;
+    }
+
+    introStartedRef.current = true;
+
+    /*
+     * Update both state AND ref immediately.
+     */
+    startedRef.current = true;
+    setStarted(true);
+
+    startedAt.current =
+      Date.now();
+
+    setPermissionStage("intro");
+
+    const welcomeMessage =
+      `Hi ${candidateName}, welcome to Mock Mind. ` +
+      `I'll be your interviewer today. ` +
+      `Before we begin, I'll need access to your camera and microphone. ` +
+      `Please allow both permissions when your browser asks. ` +
+      `Your camera helps us capture your interview presence, and your microphone lets me hear your answers. ` +
+      `Once you've allowed them, we'll get started.`;
+
+    /*
+     * Do NOT listen during permission explanation.
+     */
+    speak(
+      welcomeMessage,
+      async () => {
+        /*
+         * Request permissions only AFTER
+         * the candidate has heard the explanation.
+         */
+        const permissionGranted =
+          await prepareCamera();
+
+        if (!permissionGranted) {
+          return;
+        }
+
+        /*
+         * Allow camera preview to render.
+         */
+        setTimeout(() => {
+          setPermissionStage(
+            "question"
+          );
+
+          speakFirstQuestion();
+        }, 700);
+      },
+      false
+    );
+  }
+
+  // --------------------------------------------------
+  // SPEAK FIRST QUESTION
+  // --------------------------------------------------
+
+  function speakFirstQuestion() {
+    if (!question) {
+      return;
+    }
+
+    speak(
+      `Alright ${candidateName}, let's get started. ${question.question}`,
+      undefined,
+      true
+    );
+  }
+
+  // --------------------------------------------------
+  // SPEECH RECOGNITION
   // --------------------------------------------------
 
   function startListening() {
@@ -224,21 +588,51 @@ useEffect(() => {
     }
 
     /*
-     * Prevent multiple recognition sessions from
-     * running at the same time.
+     * Do not start while AI is speaking.
      */
-    if (
-      shouldListenRef.current &&
-      recognitionRef.current
-    ) {
+    if (speaking) {
+      return;
+    }
+
+    /*
+     * Already listening.
+     */
+    if (shouldListenRef.current) {
+      return;
+    }
+
+    /*
+     * Prevent duplicate start attempts.
+     */
+    if (recognitionStartingRef.current) {
       return;
     }
 
     shouldListenRef.current = true;
+    recognitionStartingRef.current = true;
 
     const startRecognition = () => {
-      if (!shouldListenRef.current) {
+      if (
+        !shouldListenRef.current ||
+        !startedRef.current ||
+        savingRef.current
+      ) {
+        recognitionStartingRef.current = false;
         return;
+      }
+
+      /*
+       * Make sure an old recognition instance
+       * isn't still alive.
+       */
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // Ignore
+        }
+
+        recognitionRef.current = null;
       }
 
       const recognition = new C();
@@ -247,17 +641,14 @@ useEffect(() => {
       recognition.interimResults = true;
       recognition.lang = "en-US";
 
-      // ----------------------------------------------
-      // RECOGNITION STARTED
-      // ----------------------------------------------
-
       recognition.onstart = () => {
+        recognitionStartingRef.current = false;
         setListening(true);
-      };
 
-      // ----------------------------------------------
-      // SPEECH RESULT
-      // ----------------------------------------------
+        console.log(
+          "MockMind speech recognition started."
+        );
+      };
 
       recognition.onresult = (event: any) => {
         let interimTranscript = "";
@@ -268,93 +659,140 @@ useEffect(() => {
           i++
         ) {
           const transcript =
-            event.results[i][0].transcript;
+            event.results[i][0]
+              .transcript;
 
-          if (event.results[i].isFinal) {
-            /*
-             * Save final transcript permanently.
-             *
-             * This survives recognition restarts.
-             */
+          if (
+            event.results[i].isFinal
+          ) {
             finalTranscriptRef.current +=
               transcript + " ";
           } else {
-            interimTranscript += transcript;
+            interimTranscript +=
+              transcript;
           }
         }
 
-        /*
-         * Show both finalized and currently spoken text.
-         */
         setAnswer(
           finalTranscriptRef.current +
             interimTranscript
         );
       };
 
-      // ----------------------------------------------
-      // RECOGNITION ERROR
-      // ----------------------------------------------
-
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (
+        event: any
+      ) => {
         console.log(
           "Speech recognition error:",
           event.error
         );
 
+        recognitionStartingRef.current =
+          false;
+
         /*
-         * These are common browser interruptions
-         * and don't require an error message.
+         * These are recoverable browser events.
          */
         if (
-          event.error === "no-speech" ||
-          event.error === "aborted"
+          event.error ===
+            "no-speech" ||
+          event.error ===
+            "aborted"
         ) {
           return;
         }
 
-        if (event.error === "not-allowed") {
-          shouldListenRef.current = false;
+        /*
+         * Browser denied speech recognition.
+         */
+        if (
+          event.error ===
+          "not-allowed"
+        ) {
+          shouldListenRef.current =
+            false;
+
           setListening(false);
 
           toast.error(
-            "Microphone permission was denied."
+            "Microphone/speech recognition permission was denied. Please allow microphone access in your browser."
           );
+
+          return;
         }
-      };
-
-      // ----------------------------------------------
-      // RECOGNITION ENDED
-      // ----------------------------------------------
-
-      recognition.onend = () => {
-        setListening(false);
 
         /*
-         * Chrome sometimes automatically ends
-         * SpeechRecognition.
-         *
-         * If the candidate is still answering,
-         * automatically restart it.
+         * For other temporary errors,
+         * keep the listening lifecycle alive.
          */
-        if (shouldListenRef.current) {
+        if (
+          shouldListenRef.current &&
+          startedRef.current &&
+          !savingRef.current
+        ) {
           setTimeout(() => {
-            if (shouldListenRef.current) {
+            if (
+              shouldListenRef.current &&
+              startedRef.current &&
+              !savingRef.current
+            ) {
               startRecognition();
             }
-          }, 300);
+          }, 700);
         }
       };
 
-      recognitionRef.current = recognition;
+      recognition.onend = () => {
+        recognitionStartingRef.current =
+          false;
+
+        setListening(false);
+
+        recognitionRef.current =
+          null;
+
+        /*
+         * Chrome sometimes ends continuous recognition
+         * automatically.
+         *
+         * Restart automatically while the candidate
+         * is still answering.
+         */
+        if (
+          shouldListenRef.current &&
+          startedRef.current &&
+          !savingRef.current
+        ) {
+          setTimeout(() => {
+            if (
+              shouldListenRef.current &&
+              startedRef.current &&
+              !savingRef.current
+            ) {
+              startListening();
+            }
+          }, 350);
+        }
+      };
+
+      recognitionRef.current =
+        recognition;
 
       try {
         recognition.start();
       } catch (error) {
+        recognitionStartingRef.current =
+          false;
+
         console.log(
           "Recognition start error:",
           error
         );
+
+        /*
+         * If browser says recognition is already
+         * starting, let the current lifecycle settle.
+         */
       }
     };
 
@@ -366,41 +804,181 @@ useEffect(() => {
   // --------------------------------------------------
 
   function stopListening() {
-    shouldListenRef.current = false;
+    shouldListenRef.current =
+      false;
+
+    recognitionStartingRef.current =
+      false;
 
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // Ignore stop errors
+      }
+
+      recognitionRef.current =
+        null;
     }
 
     setListening(false);
   }
 
   // --------------------------------------------------
-  // BEGIN INTERVIEW
+  // NATURAL ACKNOWLEDGEMENT
   // --------------------------------------------------
 
-  function begin() {
-    setStarted(true);
+  function getAcknowledgement(
+    currentQuestion: Question,
+    currentAnswer: string
+  ) {
+    const category =
+      currentQuestion.category
+        ?.toLowerCase() ?? "";
 
-    startedAt.current = Date.now();
+    const answerLength =
+      currentAnswer.trim().length;
 
     /*
-     * Prepare camera and microphone.
+     * Local logic only.
+     *
+     * NO Gemini/API request.
      */
-    prepareCamera();
-
-    /*
-     * Give React a moment to update the UI
-     * before speaking the first question.
-     */
-    setTimeout(() => {
-      if (question) {
-        speak(question.question);
+    if (
+      category.includes("behavior") ||
+      category.includes("leadership") ||
+      category.includes("experience")
+    ) {
+      if (answerLength > 350) {
+        return "Thank you. That's a really useful example, and I appreciate the detail.";
       }
-    }, 350);
+
+      return "Hmm, got it. That's helpful context.";
+    }
+
+    if (
+      category.includes("technical") ||
+      category.includes("computer") ||
+      category.includes("programming")
+    ) {
+      if (answerLength > 350) {
+        return "Got it. Thank you for walking me through that.";
+      }
+
+      return "Okay, I understand. Thank you.";
+    }
+
+    if (
+      category.includes("project")
+    ) {
+      return "Interesting. Thanks for explaining how you approached it.";
+    }
+
+    if (
+      category.includes("database") ||
+      category.includes("network")
+    ) {
+      return "Got it. That's a good explanation.";
+    }
+
+    if (answerLength > 450) {
+      return "Thank you. That gives me a good picture of your thinking.";
+    }
+
+    return "Hmm, got it. Thank you for your answer.";
   }
 
+
+
+  // --------------------------------------------------
+// END / CANCEL INTERVIEW
+// --------------------------------------------------
+
+function openEndInterviewModal() {
+  if (saving || endingInterview) return;
+
+  setShowEndModal(true);
+}
+
+function closeEndInterviewModal() {
+  if (endingInterview) return;
+
+  setShowEndModal(false);
+}
+
+async function endInterview() {
+  if (endingInterview || !sessionId) return;
+
+  setEndingInterview(true);
+
+  shouldListenRef.current = false;
+
+  // Stop speech recognition
+  if (recognitionRef.current) {
+    try {
+      recognitionRef.current.stop();
+    } catch {
+      // Ignore cleanup errors
+    }
+
+    recognitionRef.current = null;
+  }
+
+  setListening(false);
+
+  // Stop AI speech
+  try {
+    speechSynthesis.cancel();
+  } catch {
+    // Ignore cleanup errors
+  }
+
+  setSpeaking(false);
+
+  // Stop camera + microphone
+  if (streamRef.current) {
+    streamRef.current
+      .getTracks()
+      .forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // Ignore cleanup errors
+        }
+      });
+
+    streamRef.current = null;
+  }
+
+  setCameraOn(false);
+
+  try {
+    // Delete incomplete interview from backend
+    await cancelInterview(Number(sessionId));
+
+    // Clear local interview state
+    localStorage.removeItem("mockmind_session");
+    localStorage.removeItem("mockmind_questions");
+
+    setShowEndModal(false);
+
+    navigate("/dashboard", {
+      replace: true,
+    });
+  } catch (error: any) {
+    console.error(
+      "Could not cancel interview:",
+      error
+    );
+
+    toast.error(
+      error?.response?.data?.detail ??
+      "Could not cancel the interview. Please try again."
+    );
+
+    setEndingInterview(false);
+  }
+}
   // --------------------------------------------------
   // SUBMIT ANSWER
   // --------------------------------------------------
@@ -414,65 +992,51 @@ useEffect(() => {
       return;
     }
 
+    /*
+     * Update both state and ref immediately.
+     */
+    savingRef.current = true;
     setSaving(true);
 
-    /*
-     * Stop microphone before saving.
-     */
     stopListening();
 
-    /*
-     * Stop question audio if still playing.
-     */
     speechSynthesis.cancel();
 
     try {
       // --------------------------------------------
-      // SAVE ANSWER TO DATABASE
+      // SAVE ANSWER
       // --------------------------------------------
 
       await saveAnswer({
-        session_id: Number(sessionId),
+        session_id:
+          Number(sessionId),
+
         question_number:
           question.question_number,
-        answer_text: answer.trim(),
-        answer_duration: Math.max(1, elapsed),
-      });
 
-      /*
-       * IMPORTANT:
-       *
-       * We DO NOT call evaluateAnswer() here.
-       *
-       * The candidate's answer is only saved.
-       *
-       * This prevents one Gemini request per answer.
-       */
+        answer_text:
+          answer.trim(),
+
+        answer_duration:
+          Math.max(
+            1,
+            elapsed
+          ),
+      });
 
       // --------------------------------------------
       // FINAL QUESTION
       // --------------------------------------------
 
-      if (index === questions.length - 1) {
-        /*
-         * The final answer has already been saved.
-         *
-         * completeInterview() will:
-         *
-         * 1. Check all answers
-         * 2. Call Gemini ONCE
-         * 3. Evaluate all answers together
-         * 4. Save all scores
-         * 5. Calculate final averages
-         */
-        const result = await completeInterview(
-          Number(sessionId)
-        );
+      if (
+        index ===
+        questions.length - 1
+      ) {
+        const result =
+          await completeInterview(
+            Number(sessionId)
+          );
 
-        /*
-         * If backend reports an error, don't
-         * navigate to the results page.
-         */
         if (result?.error) {
           toast.error(
             result.reason ??
@@ -480,37 +1044,92 @@ useEffect(() => {
               "Interview could not be completed."
           );
 
+          savingRef.current = false;
+          setSaving(false);
+
           return;
         }
 
-        navigate(`/results/${sessionId}`, {
-          state: result,
-        });
+        /*
+         * Interview is over.
+         */
+        startedRef.current = false;
+        setStarted(false);
+
+        navigate(
+          `/results/${sessionId}`,
+          {
+            state: result,
+          }
+        );
 
         return;
       }
 
       // --------------------------------------------
-      // MOVE TO NEXT QUESTION
+      // ACKNOWLEDGEMENT
       // --------------------------------------------
 
-      finalTranscriptRef.current = "";
+      const acknowledgement =
+        getAcknowledgement(
+          question,
+          answer
+        );
+
+      finalTranscriptRef.current =
+        "";
 
       setAnswer("");
 
-      setIndex((currentIndex) => currentIndex + 1);
+      /*
+       * Move to next question.
+       */
+      const nextIndex =
+        index + 1;
+
+      setIndex(nextIndex);
 
       /*
-       * Speak next question.
+       * IMPORTANT:
+       *
+       * We need saving=false BEFORE the next
+       * question eventually attempts automatic
+       * listening.
+       *
+       * Update ref immediately.
        */
-      setTimeout(() => {
-        const nextQuestion =
-          questions[index + 1];
+      savingRef.current = false;
+      setSaving(false);
 
-        if (nextQuestion) {
-          speak(nextQuestion.question);
-        }
-      }, 350);
+      /*
+       * Speak acknowledgement first.
+       */
+      speak(
+        acknowledgement,
+        () => {
+          setTimeout(() => {
+            const nextQuestion =
+              questions[nextIndex];
+
+            if (!nextQuestion) {
+              return;
+            }
+
+            /*
+             * AI asks the next question.
+             *
+             * When speech ends, speak() automatically
+             * starts speech recognition.
+             */
+            speak(
+              nextQuestion.question,
+              undefined,
+              true
+            );
+          }, 250);
+        },
+        false
+      );
     } catch (err: any) {
       console.error(
         "Interview answer submission error:",
@@ -518,11 +1137,14 @@ useEffect(() => {
       );
 
       toast.error(
-        err?.response?.data?.detail ??
-          err?.response?.data?.reason ??
+        err?.response?.data
+          ?.detail ??
+          err?.response?.data
+            ?.reason ??
           "Could not save this answer."
       );
-    } finally {
+
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -559,31 +1181,48 @@ useEffect(() => {
 
       <header className="interview-top">
 
-        <div className="brand">
-          <span className="brand-mark">
-            M
-          </span>
+  <div className="brand">
+    <span className="brand-mark">
+      M
+    </span>
 
-          MOCK MIND
-        </div>
+    MOCK MIND
+  </div>
 
-        <div className="progress-text">
-          QUESTION {index + 1} /{" "}
-          {questions.length}
-        </div>
+  <div className="progress-text">
+    QUESTION{" "}
+    {index + 1} /{" "}
+    {questions.length}
+  </div>
 
-        <div className="timer">
-          {String(
-            Math.floor(elapsed / 60)
-          ).padStart(2, "0")}
-          :
-          {String(
-            elapsed % 60
-          ).padStart(2, "0")}
-        </div>
+  <div className="interview-header-actions">
 
-      </header>
+    <div className="timer">
+      {String(
+        Math.floor(elapsed / 60)
+      ).padStart(2, "0")}
+      :
+      {String(
+        elapsed % 60
+      ).padStart(2, "0")}
+    </div>
 
+    <button
+      className="end-interview-btn"
+      onClick={openEndInterviewModal}
+      disabled={
+        saving ||
+        endingInterview
+      }
+      type="button"
+    >
+      <X size={16} />
+      <span>End interview</span>
+    </button>
+
+  </div>
+
+</header>
       {/* -------------------------------------------- */}
       {/* MAIN INTERVIEW GRID                          */}
       {/* -------------------------------------------- */}
@@ -591,7 +1230,7 @@ useEffect(() => {
       <div className="interview-grid">
 
         {/* ------------------------------------------ */}
-        {/* AI INTERVIEWER                            */}
+        {/* AI INTERVIEWER                             */}
         {/* ------------------------------------------ */}
 
         <aside className="interviewer-card">
@@ -611,31 +1250,44 @@ useEffect(() => {
 
           <p>
             {speaking
-              ? "Asking your question…"
+              ? "Speaking…"
               : listening
               ? "Listening to you…"
+              : permissionStage ===
+                "requesting"
+              ? "Waiting for permissions…"
+              : permissionStage ===
+                "ready"
+              ? "You're all set."
               : "Take your time."}
           </p>
 
           <div className="voice-bars">
-            {[1, 2, 3, 4, 5, 6, 7].map(
-              (n) => (
-                <i
-                  className={
-                    speaking || listening
-                      ? "active"
-                      : ""
-                  }
-                  key={n}
-                />
-              )
-            )}
+            {[
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+            ].map((n) => (
+              <i
+                className={
+                  speaking ||
+                  listening
+                    ? "active"
+                    : ""
+                }
+                key={n}
+              />
+            ))}
           </div>
 
         </aside>
 
         {/* ------------------------------------------ */}
-        {/* CONVERSATION                              */}
+        {/* CONVERSATION                               */}
         {/* ------------------------------------------ */}
 
         <section className="conversation">
@@ -672,21 +1324,19 @@ useEffect(() => {
 
             </div>
 
-            {/* -------------------------------------- */}
-            {/* SINGLE TEXTAREA                         */}
-            {/* -------------------------------------- */}
+            {/* TEXTAREA */}
 
             <textarea
               value={answer}
               onChange={(e) =>
-                setAnswer(e.target.value)
+                setAnswer(
+                  e.target.value
+                )
               }
               placeholder="Speak naturally. Your transcript will appear here…"
             />
 
-            {/* -------------------------------------- */}
-            {/* ANSWER CONTROLS                        */}
-            {/* -------------------------------------- */}
+            {/* ANSWER CONTROLS */}
 
             <div className="answer-tools">
 
@@ -705,9 +1355,13 @@ useEffect(() => {
               >
 
                 {listening ? (
-                  <MicOff size={17} />
+                  <MicOff
+                    size={17}
+                  />
                 ) : (
-                  <Mic size={17} />
+                  <Mic
+                    size={17}
+                  />
                 )}
 
                 {listening
@@ -719,14 +1373,19 @@ useEffect(() => {
               <button
                 className="tool-btn"
                 onClick={() =>
-                  speak(question.question)
+                  speak(
+                    question.question
+                  )
                 }
                 disabled={
-                  speaking || saving
+                  speaking ||
+                  saving
                 }
               >
 
-                <Volume2 size={17} />
+                <Volume2
+                  size={17}
+                />
 
                 Repeat
 
@@ -734,7 +1393,9 @@ useEffect(() => {
 
               <button
                 className="send-btn"
-                onClick={submit}
+                onClick={
+                  submit
+                }
                 disabled={
                   saving ||
                   !answer.trim()
@@ -747,10 +1408,14 @@ useEffect(() => {
                     size={17}
                   />
                 ) : (
-                  <Send size={17} />
+                  <Send
+                    size={17}
+                  />
                 )}
 
-                {index === questions.length - 1
+                {index ===
+                questions.length -
+                  1
                   ? "Finish interview"
                   : "Submit answer"}
 
@@ -758,15 +1423,17 @@ useEffect(() => {
 
             </div>
 
-            {/* -------------------------------------- */}
-            {/* HELP TEXT                              */}
-            {/* -------------------------------------- */}
+            {/* HELP TEXT */}
 
             <p className="skip-note">
-              If you genuinely don’t know, say
-              “Sorry, I don’t know the answer.”
-              It will be recorded and evaluated as
-              part of the interview.
+              If you genuinely
+              don’t know, say
+              “Sorry, I don’t
+              know the answer.”
+              It will be recorded
+              and evaluated as
+              part of the
+              interview.
             </p>
 
           </div>
@@ -774,7 +1441,7 @@ useEffect(() => {
         </section>
 
         {/* ------------------------------------------ */}
-        {/* CAMERA                                    */}
+        {/* CAMERA                                     */}
         {/* ------------------------------------------ */}
 
         <aside className="camera-card">
@@ -811,21 +1478,27 @@ useEffect(() => {
             ) : (
               <div className="camera-off">
 
-                <CameraOff size={28} />
+                <CameraOff
+                  size={28}
+                />
 
                 <span>
                   {cameraError ||
                     "Camera is off"}
                 </span>
 
-                <button
-                  className="ghost-btn"
-                  onClick={
-                    prepareCamera
-                  }
-                >
-                  Enable camera
-                </button>
+                {started &&
+                  permissionStage !==
+                    "intro" && (
+                    <button
+                      className="ghost-btn"
+                      onClick={
+                        prepareCamera
+                      }
+                    >
+                      Enable camera
+                    </button>
+                  )}
 
               </div>
             )}
@@ -834,10 +1507,13 @@ useEffect(() => {
 
           <div className="signal-note">
 
-            <Camera size={15} />
+            <Camera
+              size={15}
+            />
 
-            Video is being prepared for
-            future confidence analysis.
+            Video is being
+            prepared for future
+            confidence analysis.
 
           </div>
 
@@ -864,10 +1540,12 @@ useEffect(() => {
             </h2>
 
             <p>
-              We’ll ask one question at a
-              time. The AI will speak, you
-              answer naturally, and the
-              transcript is evaluated
+              We’ll ask one
+              question at a time.
+              The AI will speak,
+              you answer naturally,
+              and your responses
+              will be evaluated
               automatically.
             </p>
 
@@ -887,10 +1565,14 @@ useEffect(() => {
 
             <button
               className="primary-btn large"
-              onClick={begin}
+              onClick={
+                begin
+              }
             >
 
-              <Check size={18} />
+              <Check
+                size={18}
+              />
 
               Enter interview room
 
@@ -901,6 +1583,166 @@ useEffect(() => {
         </div>
 
       )}
+
+      {/* -------------------------------------------- */}
+      {/* PERMISSION ERROR OVERLAY                     */}
+      {/* -------------------------------------------- */}
+
+      {started &&
+        permissionStage ===
+          "error" && (
+
+        <div className="start-overlay">
+
+          <div className="start-modal">
+
+            <div className="eyebrow">
+              PERMISSION NEEDED
+            </div>
+
+            <h2>
+              Almost there,{" "}
+              {candidateName}.
+            </h2>
+
+            <p>
+              I couldn't access your
+              camera or microphone.
+              Please check your
+              browser permissions
+              and allow access so
+              Mock Mind can continue
+              with the interview.
+            </p>
+
+            <div className="permission-list">
+
+              <span>
+                <Mic />
+                Microphone
+              </span>
+
+              <span>
+                <Camera />
+                Camera
+              </span>
+
+            </div>
+
+            <button
+              className="primary-btn large"
+              onClick={
+                async () => {
+                  const granted =
+                    await prepareCamera();
+
+                  if (granted) {
+                    setTimeout(() => {
+                      setPermissionStage(
+                        "question"
+                      );
+
+                      speakFirstQuestion();
+                    }, 500);
+                  }
+                }
+              }
+            >
+
+              <Check
+                size={18}
+              />
+
+              Try permissions again
+
+            </button>
+
+          </div>
+
+        </div>
+
+      )}
+
+      {/* -------------------------------------------- */}
+{/* END INTERVIEW CONFIRMATION                  */}
+{/* -------------------------------------------- */}
+
+{showEndModal && (
+
+  <div
+    className="end-interview-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="end-interview-title"
+  >
+
+    <div className="end-interview-modal">
+
+  <button
+    className="end-interview-icon"
+    type="button"
+    onClick={closeEndInterviewModal}
+    disabled={endingInterview}
+    aria-label="Continue interview"
+  >
+    <X size={22} />
+  </button>
+
+  <div className="eyebrow">
+    END INTERVIEW
+  </div>
+
+  <h2 id="end-interview-title">
+    Are you sure you want to leave?
+  </h2>
+
+  <p>
+    If you end this interview now, your current
+    interview session will not be saved or evaluated.
+    Any answers already submitted will not be included
+    in the final interview result.
+  </p>
+
+  <div className="end-interview-actions">
+
+    <button
+      className="ghost-btn"
+      type="button"
+      onClick={closeEndInterviewModal}
+      disabled={endingInterview}
+    >
+      Continue interview
+    </button>
+
+    <button
+      className="danger-btn"
+      type="button"
+      onClick={endInterview}
+      disabled={endingInterview}
+    >
+      {endingInterview ? (
+        <>
+          <LoaderCircle
+            className="spin"
+            size={16}
+          />
+          Ending…
+        </>
+      ) : (
+        <>
+          <X size={16} />
+          End interview
+        </>
+      )}
+    </button>
+
+  </div>
+
+</div>
+
+  </div>
+
+)}
 
     </main>
   );

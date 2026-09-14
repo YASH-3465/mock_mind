@@ -173,6 +173,16 @@ export async function completeInterview(
   ).data;
 }
 
+
+export async function cancelInterview(
+  sessionId: number
+) {
+  const response = await api.delete(
+    `/interview/${sessionId}/cancel`
+  );
+
+  return response.data;
+}
 // --------------------------------------------------
 // INTERVIEW HISTORY
 // --------------------------------------------------
