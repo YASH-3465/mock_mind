@@ -6,6 +6,7 @@ from app.core.jwt import verify_token
 from app.db.database import get_db
 from app.models.interview_session import InterviewSession
 from app.models.user import User
+from app.schemas.interview_history import InterviewHistoryResponse
 
 router = APIRouter(
     prefix="/interview-history",
@@ -28,7 +29,7 @@ def get_current_user(
     return user
 
 
-@router.get("/")
+@router.get("/", response_model=InterviewHistoryResponse)
 def get_interview_history(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -50,8 +51,11 @@ def get_interview_history(
 
         duration_seconds = None
         if session.started_at and session.completed_at:
-            duration_seconds = int(
-                (session.completed_at - session.started_at).total_seconds()
+            duration_seconds = max(
+                0,
+                int(
+                    (session.completed_at - session.started_at).total_seconds()
+                ),
             )
 
         history.append(
