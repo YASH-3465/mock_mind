@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.schemas.interview_answer import InterviewAnswerRequest
 from app.services.interview_answer_service import submit_answer
+from app.services.answer_evaluation_service import evaluate_answer
 
 router = APIRouter(
     prefix="/answer",
@@ -31,3 +32,21 @@ def save_answer(
         )
 
     return answer
+
+@router.post("/{answer_id}/evaluate")
+def evaluate_saved_answer(
+    answer_id: int,
+    db: Session = Depends(get_db),
+):
+    result = evaluate_answer(
+        db=db,
+        answer_id=answer_id,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Answer not found."
+        )
+
+    return result

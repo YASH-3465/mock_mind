@@ -4,6 +4,7 @@ import shutil
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
+from app.models.resume import Resume
 
 from app.core.jwt import verify_token
 from app.db.database import get_db

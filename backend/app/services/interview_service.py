@@ -2,10 +2,14 @@ import json
 
 from sqlalchemy.orm import Session
 
+
 from app.ai.gemini import model
 from app.models.resume_analysis import ResumeAnalysis
 from app.models.interview_question import InterviewQuestion
+from app.models.interview_answer import InterviewAnswer
+from google.api_core.exceptions import ResourceExhausted
 from app.prompts.interview_prompt import INTERVIEW_QUESTION_PROMPT
+from app.services.interview_evaluation_service import evaluate_interview
 from app.models.interview_session import InterviewSession
 from datetime import datetime
 
@@ -27,13 +31,248 @@ def complete_interview(
     if not session:
         return None
 
+    questions = (
+        db.query(InterviewQuestion)
+        .filter(
+            InterviewQuestion.interview_session_id == session_id
+        )
+        .order_by(
+            InterviewQuestion.question_number
+        )
+        .all()
+    )
+
+    if not questions:
+        return {
+            "error": "No interview questions found for this session."
+        }
+
+    total_questions = len(questions)
+
+    answers = []
+
+    for question in questions:
+
+        answer = (
+            db.query(InterviewAnswer)
+            .filter(
+                InterviewAnswer.interview_question_id == question.id
+            )
+            .first()
+        )
+
+        if not answer or not answer.answer_text:
+            return {
+                "error": "Interview cannot be completed.",
+                "reason": (
+                    f"Question {question.question_number} "
+                    "has not been answered."
+                ),
+                "total_questions": total_questions
+            }
+
+        answers.append(answer)
+
+    # ------------------------------------------------
+    # EVALUATE ENTIRE INTERVIEW IN ONE GEMINI CALL
+    # ------------------------------------------------
+
+    evaluation_result = evaluate_interview(
+        db=db,
+        session_id=session_id
+    )
+
+    if not evaluation_result:
+        return {
+            "error": "Interview evaluation failed."
+        }
+
+    if evaluation_result.get("status") == "incomplete":
+        return {
+            "error": "Interview cannot be completed.",
+            "reason": evaluation_result["message"]
+        }
+    
+    if evaluation_result.get("status") == "evaluation_unavailable":
+        return {
+        "error": "Interview evaluation is temporarily unavailable.",
+        "reason": evaluation_result["message"]
+        }
+
+    # ------------------------------------------------
+    # CALCULATE FINAL SCORES
+    # ------------------------------------------------
+
+    evaluated_answers = (
+        db.query(InterviewAnswer)
+        .join(InterviewQuestion)
+        .filter(
+            InterviewQuestion.interview_session_id == session_id
+        )
+        .all()
+    )
+
+    technical_scores = [
+        a.technical_score
+        for a in evaluated_answers
+        if a.technical_score is not None
+    ]
+
+    communication_scores = [
+        a.communication_score
+        for a in evaluated_answers
+        if a.communication_score is not None
+    ]
+
+    confidence_scores = [
+        a.confidence_score
+        for a in evaluated_answers
+        if a.confidence_score is not None
+    ]
+
+    overall_scores = [
+        a.overall_score
+        for a in evaluated_answers
+        if a.overall_score is not None
+    ]
+
+    technical_average = (
+        sum(technical_scores) / len(technical_scores)
+        if technical_scores else 0
+    )
+
+    communication_average = (
+        sum(communication_scores) / len(communication_scores)
+        if communication_scores else 0
+    )
+
+    confidence_average = (
+        sum(confidence_scores) / len(confidence_scores)
+        if confidence_scores else 0
+    )
+
+    overall_average = (
+        sum(overall_scores) / len(overall_scores)
+        if overall_scores else 0
+    )
+
+    session.overall_score = round(
+        overall_average,
+        2
+    )
+
     session.status = "COMPLETED"
+
     session.completed_at = datetime.utcnow()
 
     db.commit()
     db.refresh(session)
 
-    return session
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "completed_at": session.completed_at,
+        "total_questions": total_questions,
+        "answered_questions": len(answers),
+        "evaluated_answers": len(evaluated_answers),
+        "technical_score": round(
+            technical_average,
+            2
+        ),
+        "communication_score": round(
+            communication_average,
+            2
+        ),
+        "confidence_score": round(
+            confidence_average,
+            2
+        ),
+        "overall_score": round(
+            overall_average,
+            2
+        )
+    }
+
+def get_interview_progress(
+    db: Session,
+    session_id: int,
+):
+    session = (
+        db.query(InterviewSession)
+        .filter(
+            InterviewSession.id == session_id
+        )
+        .first()
+    )
+
+    if not session:
+        return None
+
+    questions = (
+        db.query(InterviewQuestion)
+        .filter(
+            InterviewQuestion.interview_session_id == session_id
+        )
+        .order_by(
+            InterviewQuestion.question_number
+        )
+        .all()
+    )
+
+    answered_questions = 0
+    evaluated_answers = 0
+
+    question_status = []
+
+    for question in questions:
+
+        answer = (
+            db.query(InterviewAnswer)
+            .filter(
+                InterviewAnswer.interview_question_id == question.id
+            )
+            .first()
+        )
+
+        answered = (
+            answer is not None
+            and bool(answer.answer_text)
+        )
+
+        evaluated = (
+            answered
+            and answer.overall_score is not None
+        )
+
+        if answered:
+            answered_questions += 1
+
+        if evaluated:
+            evaluated_answers += 1
+
+        question_status.append({
+            "question_number": question.question_number,
+            "question_id": question.id,
+            "question": question.question,
+            "answered": answered,
+            "evaluated": evaluated,
+        })
+
+    total_questions = len(questions)
+
+    return {
+        "session_id": session.id,
+        "status": session.status,
+        "total_questions": total_questions,
+        "answered_questions": answered_questions,
+        "evaluated_answers": evaluated_answers,
+        "remaining_questions": total_questions - answered_questions,
+        "can_complete": (
+    total_questions > 0
+    and answered_questions == total_questions
+),
+        "questions": question_status,
+    }
 
 
 def generate_interview_questions(
@@ -90,7 +329,17 @@ Weaknesses:
         analysis=analysis_text
     )
 
-    response = model.generate_content(prompt)
+    try:
+        response = model.generate_content(prompt)
+
+    except ResourceExhausted:
+        return {
+            "status": "evaluation_unavailable",
+            "message": (
+                "AI evaluation is temporarily unavailable "
+                "because the Gemini API quota has been exceeded."
+            )
+        }
 
     text = response.text.strip()
 
