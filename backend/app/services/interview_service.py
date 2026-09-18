@@ -481,61 +481,144 @@ def get_interview_result(
         .filter(
             InterviewQuestion.interview_session_id == session.id
         )
-        .all()
-    )
-
-    answers = (
-        db.query(InterviewAnswer)
-        .join(InterviewQuestion)
-        .filter(
-            InterviewQuestion.interview_session_id == session.id
+        .order_by(
+            InterviewQuestion.question_number
         )
         .all()
     )
 
+    question_results = []
+
+    for question in questions:
+
+        answer = (
+            db.query(InterviewAnswer)
+            .filter(
+                InterviewAnswer.interview_question_id == question.id
+            )
+            .first()
+        )
+
+        question_results.append({
+            "question_number": question.question_number,
+            "question_id": question.id,
+            "question": question.question,
+
+            "answer": (
+                answer.answer_text
+                if answer
+                else None
+            ),
+
+            "answer_duration": (
+                answer.answer_duration
+                if answer
+                else None
+            ),
+
+            "technical_score": (
+                answer.technical_score
+                if answer and answer.technical_score is not None
+                else 0
+            ),
+
+            "communication_score": (
+                answer.communication_score
+                if answer and answer.communication_score is not None
+                else 0
+            ),
+
+            "confidence_score": (
+                answer.confidence_score
+                if answer and answer.confidence_score is not None
+                else 0
+            ),
+
+            "overall_score": (
+                answer.overall_score
+                if answer and answer.overall_score is not None
+                else 0
+            ),
+
+            "feedback": (
+                answer.feedback
+                if answer
+                else None
+            ),
+        })
+
+    answers = [
+        item
+        for item in question_results
+        if item["answer"] is not None
+    ]
+
     technical_scores = [
-        answer.technical_score
-        for answer in answers
-        if answer.technical_score is not None
+        item["technical_score"]
+        for item in answers
     ]
 
     communication_scores = [
-        answer.communication_score
-        for answer in answers
-        if answer.communication_score is not None
+        item["communication_score"]
+        for item in answers
     ]
 
     confidence_scores = [
-        answer.confidence_score
-        for answer in answers
-        if answer.confidence_score is not None
+        item["confidence_score"]
+        for item in answers
+    ]
+
+    overall_scores = [
+        item["overall_score"]
+        for item in answers
     ]
 
     return {
         "session_id": session.id,
         "status": session.status,
+        "started_at": session.started_at,
         "completed_at": session.completed_at,
+
         "total_questions": len(questions),
+
         "answered_questions": len(answers),
+
         "evaluated_answers": len([
-            answer for answer in answers
-            if answer.overall_score is not None
+            item
+            for item in answers
+            if item["overall_score"] is not None
         ]),
+
         "technical_score": round(
             sum(technical_scores) / len(technical_scores),
             2
         ) if technical_scores else 0,
+
         "communication_score": round(
             sum(communication_scores) / len(communication_scores),
             2
         ) if communication_scores else 0,
+
         "confidence_score": round(
             sum(confidence_scores) / len(confidence_scores),
             2
         ) if confidence_scores else 0,
-        "overall_score": session.overall_score or 0,
-    }
 
+        "overall_score": (
+            session.overall_score
+            if session.overall_score is not None
+            else (
+                round(
+                    sum(overall_scores) / len(overall_scores),
+                    2
+                )
+                if overall_scores
+                else 0
+            )
+        ),
+
+        "questions": question_results,
+    }
 
 def cancel_interview(
     db: Session,

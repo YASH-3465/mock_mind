@@ -23,6 +23,8 @@ import {
   logout,
 } from "../../lib/api";
 
+import MockMindBrand from "../../components/MockMindBrand";
+
 type InterviewHistoryItem = {
   session_id: number;
   status: string;
@@ -38,6 +40,19 @@ type InterviewHistoryItem = {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  useEffect(() => {
+  if (window.location.hash === "#history") {
+    setTimeout(() => {
+      const historySection =
+        document.getElementById("history");
+
+      historySection?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 100);
+  }
+}, []);
 
   const [history, setHistory] = useState<
     InterviewHistoryItem[]
@@ -74,11 +89,6 @@ export default function DashboardPage() {
   // --------------------------------------------------
   // LOGOUT
   // --------------------------------------------------
-
-  function handleLogout() {
-    logout();
-    navigate("/");
-  }
 
   // --------------------------------------------------
   // DATE
@@ -127,30 +137,9 @@ export default function DashboardPage() {
       {/* NAVIGATION                                        */}
       {/* ================================================= */}
 
-      <nav className="nav">
+  <MockMindBrand />
 
-        <Link
-          to="/dashboard"
-          className="brand"
-        >
-          <span className="brand-mark">
-            M
-          </span>
-
-          MOCK MIND
-        </Link>
-
-        <button
-          className="ghost-btn"
-          onClick={handleLogout}
-        >
-          <LogOut size={16} />
-
-          Log out
-        </button>
-
-      </nav>
-
+     
       {/* ================================================= */}
       {/* DASHBOARD                                         */}
       {/* ================================================= */}
@@ -262,7 +251,10 @@ export default function DashboardPage() {
         {/* HISTORY                                           */}
         {/* ================================================= */}
 
-        <section className="history-section">
+        <section
+  id="history"
+  className="history-section"
+>
 
           <div className="history-heading">
 

@@ -25,6 +25,8 @@ import type {
   Question,
 } from "../../lib/types";
 
+import MockMindBrand from "../../components/MockMindBrand";
+
 type SpeechRecognitionCtor = new () => any;
 
 declare global {
@@ -1181,13 +1183,19 @@ async function endInterview() {
 
       <header className="interview-top">
 
-  <div className="brand">
-    <span className="brand-mark">
-      M
-    </span>
+ <div className="brand">
+  <MockMindBrand />
+</div>
 
-    MOCK MIND
+  <div className="progress-text">
+    QUESTION{" "}
+    {index + 1} /{" "}
+    {questions.length}
   </div>
+
+  <div className="interview-header-actions">
+
+</div>
 
   <div className="progress-text">
     QUESTION{" "}

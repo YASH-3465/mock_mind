@@ -1,17 +1,48 @@
 import { ArrowRight, BrainCircuit, Camera, FileText, Mic2, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
+import MockMindBrand from "../../components/MockMindBrand";
+import mockmindLogo from "../../assets/mockmind-logo.png";
 
 export default function LandingPage() {
   return (
     <main className="landing">
-      <nav className="nav">
-        <Link to="/" className="brand"><span className="brand-mark">M</span> MOCK MIND</Link>
-        <div className="nav-actions">
-          <Link to="/login" className="ghost-btn">Log in</Link>
-          <Link to="/signup" className="primary-btn">Get started <ArrowRight size={17}/></Link>
-        </div>
-      </nav>
+<nav className="nav">
+  {/* LEFT — MOCKMIND BRAND */}
+  <Link
+    to="/"
+    className="mockmind-brand"
+    aria-label="MockMind"
+  >
+    <img
+      src={mockmindLogo}
+      alt="MockMind"
+      className="mockmind-brand-logo"
+    />
 
+    <span className="mockmind-wordmark">
+      <span className="mock">MOCK</span>
+      <span className="mind">MIND</span>
+    </span>
+  </Link>
+
+  {/* RIGHT — AUTH ACTIONS */}
+  <div className="nav-actions">
+    <Link
+      to="/login"
+      className="ghost-btn"
+    >
+      Log in
+    </Link>
+
+    <Link
+      to="/signup"
+      className="primary-btn"
+    >
+      Get started
+      <ArrowRight size={17} />
+    </Link>
+  </div>
+</nav>
       <section className="hero">
         <div className="hero-copy">
           <div className="eyebrow"><Sparkles size={15}/> AI interview simulator</div>

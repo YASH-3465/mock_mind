@@ -19,6 +19,8 @@ import {
 
 import type { Resume } from "../lib/types";
 
+import MockMindBrand from "../components/MockMindBrand";
+
 export default function ResumePage() {
   const [file, setFile] = useState<File | null>(null);
 
@@ -171,16 +173,7 @@ export default function ResumePage() {
 
       <nav className="nav">
 
-        <button
-          className="brand back-brand"
-          onClick={() => navigate("/dashboard")}
-        >
-          <span className="brand-mark">
-            M
-          </span>
-
-          MOCK MIND
-        </button>
+       <MockMindBrand />
 
         <span className="step-label">
           SETUP / 01

@@ -222,3 +222,6 @@ export async function evaluateAnswer(
     )
   ).data;
 }
+export async function getInterviewResult(sessionId: number) {
+  return (await api.get(`/interview/${sessionId}/result`)).data;
+}
