@@ -163,6 +163,32 @@ export async function generateInterview(
   ).data;
 }
 
+export async function uploadAnswerRecording(
+  sessionId: number,
+  questionNumber: number,
+  recording: Blob
+) {
+  const formData = new FormData();
+
+  formData.append(
+    "recording",
+    recording,
+    `session_${sessionId}_question_${questionNumber}.webm`
+  );
+
+  return (
+    await api.post(
+      `/interview/${sessionId}/answer/${questionNumber}/recording`,
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      }
+    )
+  ).data;
+}
+
 export async function completeInterview(
   sessionId: number
 ) {

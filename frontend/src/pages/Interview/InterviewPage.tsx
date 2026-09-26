@@ -18,6 +18,7 @@ import {
   saveAnswer,
   cancelInterview,
   getCurrentUser,
+  uploadAnswerRecording,
 } from "../../lib/api";
 
 import type {
@@ -25,7 +26,7 @@ import type {
   Question,
 } from "../../lib/types";
 
-import MockMindBrand from "../../components/MockMindBrand";
+
 
 type SpeechRecognitionCtor = new () => any;
 
@@ -60,6 +61,7 @@ export default function InterviewPage() {
   const [cameraError, setCameraError] = useState("");
 
   const [started, setStarted] = useState(false);
+  const [showReadyModal, setShowReadyModal] = useState(true);
   const [elapsed, setElapsed] = useState(0);
 
   const [showEndModal, setShowEndModal] = useState(false);
@@ -82,6 +84,12 @@ const [endingInterview, setEndingInterview] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  const recordedChunksRef = useRef<Blob[]>([]);
+
+  const recordingStartedAtRef = useRef<number | null>(null);
 
   const startedAt = useRef(Date.now());
 
@@ -119,6 +127,10 @@ const [endingInterview, setEndingInterview] = useState(false);
    * from being created simultaneously.
    */
   const recognitionStartingRef = useRef(false);
+
+  const introFinishedRef = useRef(false);
+
+  const permissionsReadyRef = useRef(false);
 
   const question = questions[index];
 
@@ -333,7 +345,7 @@ const [endingInterview, setEndingInterview] = useState(false);
       utterance.voice = preferredVoice;
     }
 
-    utterance.rate = 0.96;
+    utterance.rate = 1.08;
     utterance.pitch = 1;
 
     const finishSpeech = () => {
@@ -449,9 +461,14 @@ const [endingInterview, setEndingInterview] = useState(false);
       }
 
       setCameraOn(true);
-      setPermissionStage("ready");
 
-      return true;
+permissionsReadyRef.current = true;
+
+setPermissionStage("ready");
+
+revealFirstQuestionIfReady();
+
+return true;
     } catch (error) {
       console.error(
         "Camera/microphone permission error:",
@@ -493,68 +510,76 @@ const [endingInterview, setEndingInterview] = useState(false);
     }
   }, [cameraOn]);
 
+
+    useEffect(() => {
+    if (
+      !question ||
+      candidateName === "there" ||
+      introStartedRef.current
+    ) {
+      return;
+    }
+
+    startInterviewIntro();
+  }, [question, candidateName]);
+ 
   // --------------------------------------------------
   // BEGIN INTERVIEW
   // --------------------------------------------------
 
-  function begin() {
-    if (introStartedRef.current) {
-      return;
-    }
 
-    introStartedRef.current = true;
-
-    /*
-     * Update both state AND ref immediately.
-     */
-    startedRef.current = true;
-    setStarted(true);
-
-    startedAt.current =
-      Date.now();
-
-    setPermissionStage("intro");
-
-    const welcomeMessage =
-      `Hi ${candidateName}, welcome to Mock Mind. ` +
-      `I'll be your interviewer today. ` +
-      `Before we begin, I'll need access to your camera and microphone. ` +
-      `Please allow both permissions when your browser asks. ` +
-      `Your camera helps us capture your interview presence, and your microphone lets me hear your answers. ` +
-      `Once you've allowed them, we'll get started.`;
-
-    /*
-     * Do NOT listen during permission explanation.
-     */
-    speak(
-      welcomeMessage,
-      async () => {
-        /*
-         * Request permissions only AFTER
-         * the candidate has heard the explanation.
-         */
-        const permissionGranted =
-          await prepareCamera();
-
-        if (!permissionGranted) {
-          return;
-        }
-
-        /*
-         * Allow camera preview to render.
-         */
-        setTimeout(() => {
-          setPermissionStage(
-            "question"
-          );
-
-          speakFirstQuestion();
-        }, 700);
-      },
-      false
-    );
+function revealFirstQuestionIfReady() {
+  if (
+    !introFinishedRef.current ||
+    !permissionsReadyRef.current ||
+    !question
+  ) {
+    return;
   }
 
+  setShowReadyModal(false);
+
+  setPermissionStage("question");
+
+  speakFirstQuestion();
+}
+
+
+function startInterviewIntro() {
+  if (introStartedRef.current || !question) {
+    return;
+  }
+
+  introStartedRef.current = true;
+
+  startedRef.current = true;
+  setStarted(true);
+
+  startedAt.current = Date.now();
+
+  setPermissionStage("intro");
+
+  const welcomeMessage =
+    `Hi ${candidateName}, welcome to Mock Mind. ` +
+    `I'll be your interviewer today. ` +
+    `Before we begin, I'll need access to your camera and microphone. ` +
+    `Please allow both permissions when your browser asks. ` +
+    `Once you've allowed them, we'll get started.`;
+
+  speak(
+    welcomeMessage,
+    () => {
+      introFinishedRef.current = true;
+      revealFirstQuestionIfReady();
+    },
+    false
+  );
+
+  prepareCamera();
+}
+  function begin() {
+  startInterviewIntro();
+}
   // --------------------------------------------------
   // SPEAK FIRST QUESTION
   // --------------------------------------------------
@@ -650,6 +675,8 @@ const [endingInterview, setEndingInterview] = useState(false);
         console.log(
           "MockMind speech recognition started."
         );
+
+      startAnswerRecording();
       };
 
       recognition.onresult = (event: any) => {
@@ -826,6 +853,77 @@ const [endingInterview, setEndingInterview] = useState(false);
     setListening(false);
   }
 
+  function startAnswerRecording() {
+  const stream = streamRef.current;
+
+  if (!stream) {
+    console.warn("Camera/microphone stream is not available.");
+    return;
+  }
+
+  if (!("MediaRecorder" in window)) {
+    console.warn("MediaRecorder is not supported in this browser.");
+    return;
+  }
+
+  recordedChunksRef.current = [];
+
+  const recorder = new MediaRecorder(stream);
+
+  mediaRecorderRef.current = recorder;
+  recordingStartedAtRef.current = Date.now();
+
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) {
+      recordedChunksRef.current.push(event.data);
+    }
+  };
+
+  recorder.start();
+
+  console.log("Answer recording started.");
+}
+
+function stopAnswerRecording(): Promise<Blob | null> {
+  const recorder = mediaRecorderRef.current;
+
+  if (!recorder || recorder.state === "inactive") {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    recorder.onstop = () => {
+      const recordingDuration = recordingStartedAtRef.current
+        ? Date.now() - recordingStartedAtRef.current
+        : 0;
+
+      console.log(
+        `Answer recording stopped. Duration: ${recordingDuration} ms`
+      );
+
+      const blob = new Blob(
+        recordedChunksRef.current,
+        {
+          type: "video/webm",
+        }
+      );
+
+      console.log(
+        "Recorded blob size:",
+        blob.size,
+        "bytes"
+      );
+
+      mediaRecorderRef.current = null;
+      recordingStartedAtRef.current = null;
+
+      resolve(blob);
+    };
+
+    recorder.stop();
+  });
+}
+
   // --------------------------------------------------
   // NATURAL ACKNOWLEDGEMENT
   // --------------------------------------------------
@@ -1001,6 +1099,15 @@ async function endInterview() {
     setSaving(true);
 
     stopListening();
+
+    const answerRecording = await stopAnswerRecording();
+    if (answerRecording) {
+      await uploadAnswerRecording(
+        Number(sessionId),
+        question.question_number,
+        answerRecording
+      );
+    }
 
     speechSynthesis.cancel();
 
@@ -1183,9 +1290,6 @@ async function endInterview() {
 
       <header className="interview-top">
 
- <div className="brand">
-  <MockMindBrand />
-</div>
 
   <div className="progress-text">
     QUESTION{" "}
@@ -1298,6 +1402,7 @@ async function endInterview() {
         {/* CONVERSATION                               */}
         {/* ------------------------------------------ */}
 
+        {permissionStage === "question" && (
         <section className="conversation">
 
           <div className="question-meta">
@@ -1447,6 +1552,7 @@ async function endInterview() {
           </div>
 
         </section>
+        )}
 
         {/* ------------------------------------------ */}
         {/* CAMERA                                     */}
@@ -1533,7 +1639,7 @@ async function endInterview() {
       {/* START INTERVIEW OVERLAY                      */}
       {/* -------------------------------------------- */}
 
-      {!started && (
+     {showReadyModal && (
 
         <div className="start-overlay">
 
@@ -1639,22 +1745,13 @@ async function endInterview() {
 
             <button
               className="primary-btn large"
-              onClick={
-                async () => {
-                  const granted =
-                    await prepareCamera();
+             onClick={async () => {
+  const granted = await prepareCamera();
 
-                  if (granted) {
-                    setTimeout(() => {
-                      setPermissionStage(
-                        "question"
-                      );
-
-                      speakFirstQuestion();
-                    }, 500);
-                  }
-                }
-              }
+  if (granted) {
+    revealFirstQuestionIfReady();
+  }
+}}
             >
 
               <Check

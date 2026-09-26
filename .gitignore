@@ -20,3 +20,19 @@ alembic/versions/__pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+
+# Behavior analysis test files
+backend/test_posture.mp4
+backend/test_posture_landmarks.mp4
+backend/test_audio.mp3
+
+# MediaPipe model
+backend/app/services/behavior/models/*.task
+
+
+backend/recordings/
+backend/test_posture.mp4
+backend/test_posture_landmarks.mp4
+backend/test_audio.mp3
+backend/app/services/behavior/models/*.task

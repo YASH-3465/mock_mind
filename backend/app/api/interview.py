@@ -1,8 +1,8 @@
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
+from pathlib import Path
 
 from app.db.database import get_db
 from app.services.interview_service import generate_interview_questions
@@ -130,3 +130,28 @@ def interview_progress(
     return result
 
 
+@router.post("/{session_id}/answer/{question_number}/recording")
+async def upload_answer_recording(
+    session_id: int,
+    question_number: int,
+    recording: UploadFile = File(...),
+):
+    recordings_dir = Path("recordings") / f"session_{session_id}"
+    recordings_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = recordings_dir / f"question_{question_number}.webm"
+
+    contents = await recording.read()
+
+    with open(file_path, "wb") as file:
+        file.write(contents)
+
+    return {
+        "session_id": session_id,
+        "question_number": question_number,
+        "filename": file_path.name,
+        "content_type": recording.content_type,
+        "file_path": str(file_path),
+        "file_size": len(contents),
+        "message": "Recording saved successfully.",
+    }
